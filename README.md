@@ -1,5 +1,7 @@
 # EviDock
 
+[![CI](https://github.com/thelapwing/evi/actions/workflows/ci.yml/badge.svg)](https://github.com/thelapwing/evi/actions/workflows/ci.yml)
+
 EviDock is a local tool for managing evidence in audit and compliance work.
 The `evi` CLI maintains an evidence registry and checks whether its sources
 still match a reviewed integrity lock. Users choose requirements and sources,
@@ -60,6 +62,13 @@ The optional guides in [`skills/`](./skills/) cover:
 They are not loaded automatically or copied into projects; provide a guide to
 your agent when needed. Project organization, analysis methods, and report
 formats are up to you.
+
+## Tests
+
+Run `go test -race -cover ./...` locally. GitHub Actions runs tests, formatting
+checks, static analysis, and a build on pushes to `main` and pull requests.
+Each successful run shows coverage in its summary and provides downloadable
+text and HTML coverage reports.
 
 ## License
 

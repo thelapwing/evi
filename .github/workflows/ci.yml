@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            printf 'Go files need formatting:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests with race detection and coverage
+        run: go test -count=1 -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Build
+        run: go build -o bin/evi ./cmd/evi
+      - name: Coverage report
+        run: |
+          go tool cover -func=coverage.out > coverage.txt
+          go tool cover -html=coverage.out -o coverage.html
+          {
+            echo '## Test coverage'
+            echo
+            echo '```text'
+            cat coverage.txt
+            echo '```'
+            echo
+            echo 'Download the coverage artifact for the interactive HTML report.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.txt
+            coverage.html
+          if-no-files-found: error
+          retention-days: 14
