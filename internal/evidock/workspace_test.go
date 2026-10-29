@@ -271,8 +271,6 @@ func TestEvidenceTemplateIsEmptyAndExampleIsValid(t *testing.T) {
 			Product     string `yaml:"product"`
 			Requirement string `yaml:"requirement"`
 			Path        string `yaml:"path"`
-			StartLine   int    `yaml:"start_line"`
-			EndLine     int    `yaml:"end_line"`
 		} `yaml:"evidence"`
 	}
 	if err := yaml.Unmarshal([]byte(defaultEvidenceYAML), &declaration); err != nil {
@@ -295,7 +293,7 @@ func TestEvidenceTemplateIsEmptyAndExampleIsValid(t *testing.T) {
 		t.Fatalf("expected one example entry: %s", example.String())
 	}
 	entry := declaration.Evidence[0]
-	if entry.ID != "ev-001" || entry.Product != "product-a" || entry.Requirement != "update-integrity" || entry.Path != "sources/update.go" || entry.StartLine != 12 || entry.EndLine != 18 {
+	if entry.ID != "ev-001" || entry.Product != "product-a" || entry.Requirement != "update-integrity" || entry.Path != "sources/update.go" {
 		t.Fatalf("unexpected evidence example: %+v", entry)
 	}
 }

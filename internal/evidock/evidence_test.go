@@ -26,17 +26,16 @@ func evidenceWorkspace(t *testing.T) string {
 		t.Fatal(err)
 	}
 	writeEvidenceTestFile(t, filepath.Join(base, "source.txt"), "one\r\ntwo\nthree")
+	writeEvidenceTestFile(t, filepath.Join(base, "other.txt"), "alpha\nbeta")
 	writeEvidenceTestFile(t, filepath.Join(root, "evidence.yaml"), `evidence:
-  - id: ev-whole
+  - id: ev-first
     product: rauc
     requirement: cra-2d
     path: ../source.txt
-  - id: ev-range
+  - id: ev-second
     product: rauc
     requirement: cra-2d
-    path: ../source.txt
-    start_line: 2
-    end_line: 3
+    path: ../other.txt
 `)
 	if _, err := NewWorkspaceService().Lock(root); err != nil {
 		t.Fatal(err)
@@ -65,11 +64,11 @@ func TestEvidenceLockRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lock.SchemaVersion != 2 || len(lock.Declarations) != 2 || len(lock.Files) != 1 || len(lock.Fragments) != 1 {
+	if lock.SchemaVersion != 2 || len(lock.Declarations) != 2 || len(lock.Files) != 2 {
 		t.Fatalf("unexpected lock: %+v", lock)
 	}
-	if lock.Files[0].SHA256 != digest([]byte("one\r\ntwo\nthree")) ||
-		lock.Fragments[0].SHA256 != digest([]byte("two\nthree")) {
+	if lock.Files[0].SHA256 != digest([]byte("alpha\nbeta")) ||
+		lock.Files[1].SHA256 != digest([]byte("one\r\ntwo\nthree")) {
 		t.Fatalf("incorrect raw-byte hashes: %+v", lock)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, lock.LockedAt); err != nil {
@@ -115,12 +114,7 @@ func TestValidateRejectsInvalidEvidence(t *testing.T) {
 		"missing file":       "evidence: [{id: ev, product: p, requirement: r, path: missing.txt}]",
 		"directory":          "evidence: [{id: ev, product: p, requirement: r, path: shared}]",
 		"self lock":          "evidence: [{id: ev, product: p, requirement: r, path: evidence.lock.yaml}]",
-		"partial range":      "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 1}]",
-		"zero line":          "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 0, end_line: 1}]",
-		"negative line":      "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: -1, end_line: 1}]",
-		"reversed range":     "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 3, end_line: 2}]",
-		"past EOF":           "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 1, end_line: 4}]",
-		"noninteger line":    "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: x, end_line: 2}]",
+		"line fields":        "evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 1, end_line: 2}]",
 		"duplicate ID": `evidence:
   - {id: ev, product: p, requirement: r, path: ../source.txt}
   - {id: ev, product: p, requirement: r, path: ../source.txt}
@@ -145,7 +139,7 @@ func TestValidateRejectsInvalidEvidence(t *testing.T) {
 }
 
 func TestVerifyDetectsChanges(t *testing.T) {
-	for _, change := range []string{"source", "outside range", "label", "range", "id", "path", "remove entry", "fragment hash", "schema", "timestamp", "unknown lock field", "missing source"} {
+	for _, change := range []string{"source", "label", "id", "path", "remove entry", "file hash", "schema", "timestamp", "unknown lock field", "missing source"} {
 		t.Run(change, func(t *testing.T) {
 			root := evidenceWorkspace(t)
 			svc := NewWorkspaceService()
@@ -158,26 +152,22 @@ func TestVerifyDetectsChanges(t *testing.T) {
 			switch change {
 			case "source":
 				writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), "one\r\nchanged\nthree")
-			case "outside range":
-				writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), "changed\r\ntwo\nthree")
 			case "label":
 				text = strings.ReplaceAll(text, "rauc", "other")
-			case "range":
-				text = strings.ReplaceAll(text, "start_line: 2", "start_line: 1")
 			case "id":
-				text = strings.ReplaceAll(text, "ev-whole", "new-id")
+				text = strings.ReplaceAll(text, "ev-first", "new-id")
 			case "path":
 				text = strings.ReplaceAll(text, "../source.txt", ".././source.txt")
 			case "remove entry":
-				text = strings.Split(text, "  - id: ev-range")[0]
-			case "fragment hash", "schema", "timestamp":
+				text = strings.Split(text, "  - id: ev-second")[0]
+			case "file hash", "schema", "timestamp":
 				var lock EvidenceLock
 				if err := decodeYAML(lockPath, &lock); err != nil {
 					t.Fatal(err)
 				}
 				switch change {
-				case "fragment hash":
-					lock.Fragments[0].SHA256 = strings.Repeat("0", 64)
+				case "file hash":
+					lock.Files[0].SHA256 = strings.Repeat("0", 64)
 				case "schema":
 					lock.SchemaVersion = 99
 				case "timestamp":
@@ -230,31 +220,6 @@ func TestEmptyAndMissingEvidence(t *testing.T) {
 	}
 }
 
-func TestFragmentLineBoundaries(t *testing.T) {
-	for _, content := range []string{"", "one", "one\n", "one\r\n", "one\n\n"} {
-		t.Run(content, func(t *testing.T) {
-			root := evidenceWorkspace(t)
-			writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), content)
-			writeEvidenceTestFile(t, filepath.Join(root, "evidence.yaml"),
-				"evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 1, end_line: 1}]\n")
-			lock, err := NewWorkspaceService().Lock(root)
-			if content == "" {
-				if err == nil {
-					t.Fatal("empty file has no line 1")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			first := strings.SplitAfter(content, "\n")[0]
-			if lock.Fragments[0].SHA256 != digest([]byte(first)) {
-				t.Fatal("fragment must preserve exact line bytes")
-			}
-		})
-	}
-}
-
 func TestEvidenceCannotAliasLock(t *testing.T) {
 	root := evidenceWorkspace(t)
 	if err := os.Symlink("evidence.lock.yaml", filepath.Join(root, "alias.yaml")); err != nil {
@@ -267,29 +232,16 @@ func TestEvidenceCannotAliasLock(t *testing.T) {
 	}
 }
 
-func TestRangeOnlyEvidenceDetectsChangesOutsideRange(t *testing.T) {
-	root := evidenceWorkspace(t)
-	writeEvidenceTestFile(t, filepath.Join(root, "evidence.yaml"),
-		"evidence: [{id: ev, product: p, requirement: r, path: ../source.txt, start_line: 2, end_line: 3}]\n")
-	svc := NewWorkspaceService()
-	if _, err := svc.Lock(root); err != nil {
-		t.Fatal(err)
-	}
-	writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), "changed\r\ntwo\nthree")
-	if _, err := svc.Verify(root); err == nil || !strings.Contains(err.Error(), "source files") {
-		t.Fatalf("full source hash must detect changes outside fragment: %v", err)
-	}
-}
-
 func TestVerifyChangeDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		path    string
 		content string
 		want    string
+		notWant string
 	}{
-		{"inside range", "one\r\nchanged\nthree", "fragment at lines 2-3 differs from lock; check content and possible line shifts"},
-		{"outside range", "changed\r\ntwo\nthree", "fragment at lines 2-3 unchanged (change outside selected range)"},
-		{"shifted range", "added\none\r\ntwo\nthree", "fragment at lines 2-3 differs from lock; check content and possible line shifts"},
+		{"first source", "../source.txt", "one\r\nchanged\nthree", "../source.txt [evidence: ev-first]: file SHA-256 changed", "ev-second"},
+		{"second source", "../other.txt", "alpha\nchanged", "../other.txt [evidence: ev-second]: file SHA-256 changed", "ev-first"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := evidenceWorkspace(t)
@@ -299,19 +251,16 @@ func TestVerifyChangeDiagnostics(t *testing.T) {
 			}
 
 			before := readEvidenceTestFile(t, filepath.Join(root, "evidence.lock.yaml"))
-			writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), tc.content)
+			writeEvidenceTestFile(t, filepath.Join(root, tc.path), tc.content)
 			_, err := svc.Verify(root)
 			if err == nil {
 				t.Fatal("expected verification failure")
 			}
-			for _, want := range []string{
-				"../source.txt [evidence: ev-range]",
-				tc.want,
-				"../source.txt [evidence: ev-whole]: whole-file SHA-256 changed",
-			} {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("expected %q in %q", want, err.Error())
-				}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q in %q", tc.want, err.Error())
+			}
+			if strings.Contains(err.Error(), tc.notWant) {
+				t.Fatalf("unchanged evidence must not be reported in %q", err.Error())
 			}
 			if !bytes.Equal(before, readEvidenceTestFile(t, filepath.Join(root, "evidence.lock.yaml"))) {
 				t.Fatal("verify must preserve lock")
@@ -327,17 +276,15 @@ func TestVerifyDeclarationDiagnostics(t *testing.T) {
 		want []string
 	}{
 		{"labels", func(s string) string { return strings.ReplaceAll(s, "rauc", "updated") },
-			[]string{"ev-range]: declaration changed", "ev-whole]: declaration changed"}},
-		{"range", func(s string) string { return strings.ReplaceAll(s, "start_line: 2", "start_line: 1") },
-			[]string{"ev-range]: declaration changed"}},
+			[]string{"ev-first]: declaration changed", "ev-second]: declaration changed"}},
 		{"path", func(s string) string { return strings.ReplaceAll(s, "../source.txt", ".././source.txt") },
-			[]string{".././source.txt [evidence: ev-range]: declaration changed", "previous path: ../source.txt"}},
-		{"rename", func(s string) string { return strings.ReplaceAll(s, "ev-whole", "ev-new") },
-			[]string{"ev-new]: declaration added", "ev-whole]: declaration removed"}},
-		{"remove", func(s string) string { return strings.Split(s, "  - id: ev-range")[0] },
-			[]string{"ev-range]: declaration removed"}},
+			[]string{".././source.txt [evidence: ev-first]: declaration changed", "previous path: ../source.txt"}},
+		{"rename", func(s string) string { return strings.ReplaceAll(s, "ev-first", "ev-new") },
+			[]string{"ev-new]: declaration added", "ev-first]: declaration removed"}},
+		{"remove", func(s string) string { return strings.Split(s, "  - id: ev-second")[0] },
+			[]string{"ev-second]: declaration removed"}},
 		{"remove all", func(string) string { return "evidence: []\n" },
-			[]string{"ev-range]: declaration removed", "ev-whole]: declaration removed"}},
+			[]string{"ev-first]: declaration removed", "ev-second]: declaration removed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := evidenceWorkspace(t)
@@ -384,7 +331,7 @@ func TestVerifyLegacyLock(t *testing.T) {
 		t.Fatalf("unchanged schema 1 must still verify: %v", err)
 	}
 	writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), "one\r\nchanged\nthree")
-	if _, err := svc.Verify(root); err == nil || !strings.Contains(err.Error(), "ev-range") {
+	if _, err := svc.Verify(root); err == nil || !strings.Contains(err.Error(), "ev-first") {
 		t.Fatalf("schema 1 must still diagnose source changes: %v", err)
 	}
 	path := filepath.Join(root, "evidence.yaml")

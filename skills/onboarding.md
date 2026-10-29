@@ -32,8 +32,7 @@ method.
    installed `evi` command or the invocation documented in the tool README;
    do not assume the tool repository is the current directory.
 2. Explain each field: stable unique `id`, `product`, `requirement`, and local
-   source `path`; optional `start_line` and `end_line` must be supplied together
-   and refer to inclusive, 1-based line numbers.
+   source `path`.
 3. Add only real sources selected with the user. Never invent IDs, paths,
    citations, hashes or test results. Preserve existing entries. An empty
    registry is valid scaffolding.
