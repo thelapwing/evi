@@ -22,8 +22,6 @@ type Evidence struct {
 	Product     string `yaml:"product"`
 	Requirement string `yaml:"requirement"`
 	Path        string `yaml:"path"`
-	StartLine   *int   `yaml:"start_line,omitempty"`
-	EndLine     *int   `yaml:"end_line,omitempty"`
 }
 
 type LockedFile struct {
@@ -31,23 +29,13 @@ type LockedFile struct {
 	SHA256 string `yaml:"sha256"`
 }
 
-type LockedFragment struct {
-	Registry  string `yaml:"registry,omitempty"`
-	ID        string `yaml:"id"`
-	Path      string `yaml:"path"`
-	StartLine int    `yaml:"start_line"`
-	EndLine   int    `yaml:"end_line"`
-	SHA256    string `yaml:"sha256"`
-}
-
 type EvidenceLock struct {
-	SchemaVersion  int              `yaml:"schema_version"`
-	LockedAt       string           `yaml:"locked_at"`
-	EvidenceSHA256 string           `yaml:"evidence_sha256"`
-	Declarations   []Evidence       `yaml:"declarations,omitempty"`
-	Registries     []string         `yaml:"registries,omitempty"`
-	Files          []LockedFile     `yaml:"files"`
-	Fragments      []LockedFragment `yaml:"fragments"`
+	SchemaVersion  int          `yaml:"schema_version"`
+	LockedAt       string       `yaml:"locked_at"`
+	EvidenceSHA256 string       `yaml:"evidence_sha256"`
+	Declarations   []Evidence   `yaml:"declarations,omitempty"`
+	Registries     []string     `yaml:"registries,omitempty"`
+	Files          []LockedFile `yaml:"files"`
 }
 
 type evidenceKey struct {
@@ -134,7 +122,6 @@ func collectEvidence(root string) ([]Evidence, EvidenceLock, error) {
 	lock := EvidenceLock{
 		SchemaVersion: 2,
 		Files:         []LockedFile{},
-		Fragments:     []LockedFragment{},
 	}
 	registries, indexed, err := evidenceRegistries(root)
 	if err != nil {
@@ -190,9 +177,6 @@ func collectEvidence(root string) ([]Evidence, EvidenceLock, error) {
 		if filepath.IsAbs(entry.Path) || filepath.VolumeName(entry.Path) != "" {
 			return nil, lock, fmt.Errorf("evidence %s: path must be workspace-relative", entry.label())
 		}
-		if (entry.StartLine == nil) != (entry.EndLine == nil) {
-			return nil, lock, fmt.Errorf("evidence %s: start_line and end_line must be supplied together", entry.label())
-		}
 		path := filepath.Join(root, entry.Path)
 		absolute, err := filepath.Abs(path)
 		if err != nil {
@@ -222,21 +206,6 @@ func collectEvidence(root string) ([]Evidence, EvidenceLock, error) {
 				return nil, lock, fmt.Errorf("evidence %s: read %s: %w", entry.label(), entry.Path, err)
 			}
 			files[entry.Path] = content
-		}
-		if entry.StartLine != nil {
-			// Retain exact bytes, including CRLF and the final newline if present.
-			lines := bytes.SplitAfter(content, []byte("\n"))
-			if len(lines[len(lines)-1]) == 0 {
-				lines = lines[:len(lines)-1]
-			}
-			first, last := *entry.StartLine, *entry.EndLine
-			if first < 1 || last < first || last > len(lines) {
-				return nil, lock, fmt.Errorf("evidence %s: invalid line range %d-%d (file has %d lines)", entry.label(), first, last, len(lines))
-			}
-			lock.Fragments = append(lock.Fragments, LockedFragment{
-				Registry: entry.Registry, ID: entry.ID, Path: entry.Path, StartLine: first, EndLine: last,
-				SHA256: digest(bytes.Join(lines[first-1:last], nil)),
-			})
 		}
 	}
 	canonical, err := json.Marshal(entries)
@@ -335,9 +304,6 @@ func (s *WorkspaceService) Verify(root string) (*EvidenceLock, error) {
 	if !reflect.DeepEqual(stored.Files, current.Files) {
 		changes.WriteString("\nsource files or SHA-256 hashes differ from lock")
 		changes.WriteString(evidenceChanges(entries, stored, current))
-	} else if !reflect.DeepEqual(stored.Fragments, current.Fragments) {
-		changes.WriteString("\nsource fragments or SHA-256 hashes differ from lock")
-		changes.WriteString(evidenceChanges(entries, stored, current))
 	}
 	if changes.Len() > 0 {
 		return nil, fmt.Errorf("evidence verification failed:%s", changes.String())
@@ -359,7 +325,7 @@ func declarationChanges(stored, current []Evidence) string {
 		if !exists {
 			fmt.Fprintf(&details, "\n- %s [evidence: %s]: declaration added", entry.Path, entry.label())
 		} else if !reflect.DeepEqual(previous, entry) {
-			fmt.Fprintf(&details, "\n- %s [evidence: %s]: declaration changed (previous path: %s; check labels, path and range)", entry.Path, entry.label(), previous.Path)
+			fmt.Fprintf(&details, "\n- %s [evidence: %s]: declaration changed (previous path: %s; check labels and path)", entry.Path, entry.label(), previous.Path)
 		}
 		delete(old, entry.key())
 	}
@@ -376,14 +342,6 @@ func evidenceChanges(entries []Evidence, stored, current EvidenceLock) string {
 	for _, file := range stored.Files {
 		files[file.Path] = file.SHA256
 	}
-	fragments := make(map[evidenceKey]LockedFragment, len(stored.Fragments))
-	for _, fragment := range stored.Fragments {
-		fragments[evidenceKey{fragment.Registry, fragment.ID}] = fragment
-	}
-	currentFragments := make(map[evidenceKey]LockedFragment, len(current.Fragments))
-	for _, fragment := range current.Fragments {
-		currentFragments[evidenceKey{fragment.Registry, fragment.ID}] = fragment
-	}
 	changedFiles := make(map[string]bool)
 	for _, file := range current.Files {
 		changedFiles[file.Path] = files[file.Path] != file.SHA256
@@ -391,22 +349,12 @@ func evidenceChanges(entries []Evidence, stored, current EvidenceLock) string {
 
 	var details strings.Builder
 	for _, entry := range entries {
-		fragment, ranged := currentFragments[entry.key()]
-		fragmentChanged := ranged && fragments[entry.key()] != fragment
-		if !changedFiles[entry.Path] && !fragmentChanged {
-			continue
-		}
-		fmt.Fprintf(&details, "\n- %s [evidence: %s]", entry.Path, entry.label())
-		if !ranged {
-			details.WriteString(": whole-file SHA-256 changed")
-		} else if fragmentChanged {
-			fmt.Fprintf(&details, ": fragment at lines %d-%d differs from lock; check content and possible line shifts", fragment.StartLine, fragment.EndLine)
-		} else {
-			fmt.Fprintf(&details, ": file SHA-256 changed; fragment at lines %d-%d unchanged (change outside selected range)", fragment.StartLine, fragment.EndLine)
+		if changedFiles[entry.Path] {
+			fmt.Fprintf(&details, "\n- %s [evidence: %s]: file SHA-256 changed", entry.Path, entry.label())
 		}
 	}
 	if details.Len() == 0 {
-		details.WriteString("\n- lock file/fragment records differ; inspect evidence.lock.yaml")
+		details.WriteString("\n- lock file records differ; inspect evidence.lock.yaml")
 	}
 	return details.String()
 }

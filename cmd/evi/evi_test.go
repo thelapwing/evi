@@ -46,7 +46,7 @@ func TestEvidenceCommands(t *testing.T) {
 	rootCmd.SetOut(out)
 	rootCmd.SetErr(out)
 	rootCmd.SetArgs([]string{"--workspace", root, "verify"})
-	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "source.txt [evidence: ev]: whole-file SHA-256 changed") {
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "source.txt [evidence: ev]: file SHA-256 changed") {
 		t.Fatalf("expected verification error, got %v", err)
 	}
 	if out.Len() != 0 {

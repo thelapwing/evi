@@ -10,7 +10,7 @@ import (
 func init() {
 	rootCmd.AddCommand(
 		&cobra.Command{
-			Use: "validate", Short: "Validate evidence declarations, files, and line ranges",
+			Use: "validate", Short: "Validate evidence declarations and files",
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				count, err := evidock.NewWorkspaceService().Validate(workspaceDir)
@@ -29,7 +29,7 @@ func init() {
 				if err != nil {
 					return err
 				}
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Lock saved: %d files, %d fragments; %s.\n", len(lock.Files), len(lock.Fragments), lock.LockedAt)
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Lock saved: %d files; %s.\n", len(lock.Files), lock.LockedAt)
 				return err
 			},
 		},
@@ -41,7 +41,7 @@ func init() {
 				if err != nil {
 					return err
 				}
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Integrity verified: %d files, %d fragments.\n", len(lock.Files), len(lock.Fragments))
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Integrity verified: %d files.\n", len(lock.Files))
 				return err
 			},
 		},

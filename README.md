@@ -31,14 +31,11 @@ evidence:
     product: product-a
     requirement: update-integrity
     path: sources/update.go
-    start_line: 12
-    end_line: 18
 ```
 
-Each entry identifies a source file and optionally an inclusive, 1-based line
-range (omit both line fields for the whole file). IDs must be unique and stable;
-paths are relative to the project root. Use IDs to cite sources in your own
-analysis records.
+Each entry identifies a source file. IDs must be unique and stable; paths are
+relative to the project root. Use IDs to cite sources in your own analysis
+records.
 
 ```sh
 ./bin/evi --workspace ../my-audit validate

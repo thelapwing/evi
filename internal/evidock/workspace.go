@@ -45,14 +45,11 @@ func writeFileIfMissing(path string, content []byte) error {
 const defaultEvidenceYAML = `evidence: []
 
 # Add real evidence entries when needed; init does not create evidence.
-# Each entry identifies one file or one inclusive, 1-based line range.
-# Paths are relative to this workspace. Omit both line fields for a whole file.
+# Each entry identifies one file. Paths are relative to this workspace.
 # - id: ev-001
 #   product: product-a
 #   requirement: update-integrity
 #   path: sources/update.go
-#   start_line: 12
-#   end_line: 18
 `
 
 const defaultWorkspaceREADME = `# Workspace
