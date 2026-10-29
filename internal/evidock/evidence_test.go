@@ -269,6 +269,70 @@ func TestVerifyChangeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestSharedSourceReportsAllEntries(t *testing.T) {
+	root := evidenceWorkspace(t)
+	writeEvidenceTestFile(t, filepath.Join(root, "evidence.yaml"), `evidence:
+  - id: ev-a
+    product: rauc
+    requirement: cra-2d
+    path: ../source.txt
+  - id: ev-b
+    product: rauc
+    requirement: cra-2d
+    path: ../source.txt
+`)
+	svc := NewWorkspaceService()
+	lock, err := svc.Lock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lock.Files) != 1 {
+		t.Fatalf("shared source must be hashed once: %+v", lock.Files)
+	}
+	writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), "changed")
+	_, err = svc.Verify(root)
+	if err == nil {
+		t.Fatal("expected verification failure")
+	}
+	for _, want := range []string{"ev-a", "ev-b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected both entries reported, missing %q in %q", want, err.Error())
+		}
+	}
+}
+
+func TestVerifyDetectsContentChanges(t *testing.T) {
+	binary := string([]byte{0x00, 0xff, 0x0a, 0x00, 0x01})
+	for _, tc := range []struct {
+		name    string
+		content string
+		changed string
+	}{
+		{"empty file", "", "\n"},
+		{"binary bytes", binary, binary + "\x00"},
+		{"trailing newline", "one\ntwo", "one\ntwo\n"},
+		{"single byte", "one\ntwo\n", "one\nTwo\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := evidenceWorkspace(t)
+			writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), tc.content)
+			writeEvidenceTestFile(t, filepath.Join(root, "evidence.yaml"),
+				"evidence: [{id: ev, product: p, requirement: r, path: ../source.txt}]\n")
+			svc := NewWorkspaceService()
+			if _, err := svc.Lock(root); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.Verify(root); err != nil {
+				t.Fatal(err)
+			}
+			writeEvidenceTestFile(t, filepath.Join(root, "../source.txt"), tc.changed)
+			if _, err := svc.Verify(root); err == nil {
+				t.Fatal("content change must fail verification")
+			}
+		})
+	}
+}
+
 func TestVerifyDeclarationDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		name string
